@@ -103,11 +103,11 @@ void InputReader::ParseLine(std::string_view line) {
 }
 
 void InputReader::ApplyCommands([[maybe_unused]] TransportCatalogue& catalogue) const {
-    // Сначала обрабатываем все остановки
+     // Сначала обрабатываем все остановки
     for (const auto& command : commands_) {
         if (command.command == "Stop") {
             auto coords = ParseCoordinates(command.description);
-            catalogue.AddStop(command.id, coords.lat, coords.lng);
+            catalogue.AddStop(command.id, coords);
         }
     }
     

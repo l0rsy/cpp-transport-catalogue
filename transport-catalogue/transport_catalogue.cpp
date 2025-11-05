@@ -6,11 +6,12 @@
 
 namespace transport {
 
-void TransportCatalogue::AddStop(std::string name, double lat, double lng) {
-    AddStop(std::move(name), Coordinates{lat, lng});
+size_t TransportCatalogue::PairStopHasher::operator()(const std::pair<const Stop*, const Stop*>& stops) const {
+    return std::hash<const void*>{}(stops.first) * 37 + 
+           std::hash<const void*>{}(stops.second);
 }
 
-void TransportCatalogue::AddStop(std::string name, Coordinates coords) {
+void TransportCatalogue::AddStop(const std::string& name, Coordinates coords) {
     stops_.push_back({std::move(name), coords});
     const Stop* new_stop = &stops_.back();
     stop_name_to_stop_[new_stop->name] = new_stop;
@@ -19,7 +20,7 @@ void TransportCatalogue::AddStop(std::string name, Coordinates coords) {
     stop_to_buses_[new_stop];
 }
 
-void TransportCatalogue::AddBus(std::string name, const std::vector<std::string>& stop_names, bool is_roundtrip) {
+void TransportCatalogue::AddBus(const std::string& name, const std::vector<std::string>& stop_names, bool is_roundtrip) {
     Bus bus;
     bus.name = std::move(name);
     bus.is_roundtrip = is_roundtrip;

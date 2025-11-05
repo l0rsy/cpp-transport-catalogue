@@ -36,12 +36,20 @@ void TransportCatalogue::AddBus(std::string name, const std::vector<std::string>
     buses_.push_back(std::move(bus));
     const Bus* new_bus = &buses_.back();
     
-    // Теперь сохраняем индексы (string_view будут валидными)
+    // Теперь сохраняем индексы
     bus_name_to_bus_[new_bus->name] = new_bus;
     
     // Добавляем автобус во все его остановки
     for (const Stop* stop : new_bus->stops) {
         stop_to_buses_[stop].insert(new_bus->name);
+    }
+}
+
+void TransportCatalogue::AddDistance(const std::string& from, const std::string& to, int distance) {
+    const Stop* stop_from = GetStop(from);
+    const Stop* stop_to = GetStop(to);
+    if (stop_from && stop_to) {
+        stops_distances_[{stop_from, stop_to}] = distance;
     }
 }
 
@@ -61,6 +69,22 @@ const Stop* TransportCatalogue::GetStop(std::string_view name) const {
     return nullptr;
 }
 
+
+int TransportCatalogue::GetDistance(const Stop* from, const Stop* to) const {
+    // Поиск от А до Б
+    auto it = stops_distances_.find({from, to});
+    if (it != stops_distances_.end()) {
+        return it->second;
+    }
+    // Поиск от Б до А
+    it = stops_distances_.find({to, from});
+    if (it != stops_distances_.end()) {
+        return it->second;
+    }
+    // Если расстояние между остановками не было задано, то находим географическое расстояние
+    return static_cast<int>(ComputeDistance(from->coordinates, to->coordinates));
+}
+
 std::optional<TransportCatalogue::BusInfo> TransportCatalogue::GetBusInfo(std::string_view bus_name) const {
     const Bus* bus = GetBus(bus_name);
     if (!bus || bus->stops.empty()) {
@@ -78,33 +102,38 @@ std::optional<TransportCatalogue::BusInfo> TransportCatalogue::GetBusInfo(std::s
     std::unordered_set<const Stop*> unique_stops(bus->stops.begin(), bus->stops.end());
     info.unique_stops_count = unique_stops.size();
 
-    info.route_length = 0.0;
+    // Вычисляем длину дорожного пути
+    double road_length = 0.0;
     for (size_t i = 1; i < bus->stops.size(); i++) { 
         const Stop* from = bus->stops[i - 1];
         const Stop* to = bus->stops[i];
-        info.route_length += ComputeDistance(
-            from->coordinates,
-            to->coordinates
-        );
+        road_length += GetDistance(from, to);
     }
 
     if (!bus->is_roundtrip) {
         for (size_t i = bus->stops.size() - 1; i > 0; --i) {
             const Stop* from = bus->stops[i];
             const Stop* to = bus->stops[i - 1];
-            info.route_length += ComputeDistance(
-                from->coordinates,
-                to->coordinates
-            );
+            road_length += GetDistance(from, to);
         }
-    } else {
-        const Stop* first = bus->stops.front();
-        const Stop* last = bus->stops.back();
-        info.route_length += ComputeDistance(
-            last->coordinates,
-            first->coordinates
-        );
     }
+    info.route_length = road_length;
+
+    // Вычисляем географическую длину (для извилистости)
+    double geo_length = 0.0;
+    for (size_t i = 1; i < bus->stops.size(); i++) { 
+        const Stop* from = bus->stops[i - 1];
+        const Stop* to = bus->stops[i];
+        geo_length += ComputeDistance(from->coordinates, to->coordinates);
+    }
+    if (!bus->is_roundtrip) {
+        for (size_t i = bus->stops.size() - 1; i > 0; --i) {
+            const Stop* from = bus->stops[i];
+            const Stop* to = bus->stops[i - 1];
+            geo_length += ComputeDistance(from->coordinates, to->coordinates);
+        }
+    }
+    info.curvature = road_length / geo_length;
 
     return info;
 }

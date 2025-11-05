@@ -5,6 +5,7 @@
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <regex>
 
 using namespace std;
 
@@ -74,6 +75,28 @@ std::vector<std::string_view> ParseRoute(std::string_view route) {
     }
 }
 
+/**
+ * Парсит дистанции из описания остановки - НОВАЯ ФУНКЦИЯ
+ */
+vector<pair<string, int>> ParseDistances(string_view description) {
+    vector<pair<string, int>> distances;
+    
+    // Регулярное выражение для поиска расстояний в формате "3900m to Marushkino"
+    regex distance_regex(R"((\d+)m to ([^,]+))");
+    string desc_str(description);
+    
+    auto begin = sregex_iterator(desc_str.begin(), desc_str.end(), distance_regex);
+    auto end = sregex_iterator();
+    
+    for (auto it = begin; it != end; ++it) {
+        int distance = stoi((*it)[1].str());
+        string stop_name = (*it)[2].str();
+        distances.emplace_back(move(stop_name), distance);
+    }
+    
+    return distances;
+}
+
 CommandDescription ParseCommandDescription(std::string_view line) {
     auto colon_pos = line.find(':');
     if (colon_pos == line.npos) {
@@ -102,12 +125,29 @@ void InputReader::ParseLine(std::string_view line) {
     }
 }
 
-void InputReader::ApplyCommands([[maybe_unused]] TransportCatalogue& catalogue) const {
-     // Сначала обрабатываем все остановки
+void InputReader::ApplyCommands(TransportCatalogue& catalogue) const {
+     // Сначала обрабатываем все остановки (только координаты)
     for (const auto& command : commands_) {
         if (command.command == "Stop") {
-            auto coords = ParseCoordinates(command.description);
+            // Извлекаем только координаты (все до первого расстояния)
+            auto desc_view = string_view(command.description);
+            auto distance_pos = desc_view.find("m to");
+            string_view coords_part = desc_view;
+            if (distance_pos != string_view::npos) {
+                coords_part = desc_view.substr(0, distance_pos);
+            }
+            auto coords = ParseCoordinates(string(coords_part));
             catalogue.AddStop(command.id, coords);
+        }
+    }
+    
+    // Затем обрабатываем расстояния между остановками
+    for (const auto& command : commands_) {
+        if (command.command == "Stop") {
+            auto distances = ParseDistances(command.description);
+            for (const auto& [to_stop, distance] : distances) {
+                catalogue.AddDistance(command.id, to_stop, distance);
+            }
         }
     }
     

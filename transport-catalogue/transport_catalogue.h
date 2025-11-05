@@ -27,8 +27,8 @@ class TransportCatalogue {
 public:
     void AddStop(std::string name, double lat, double lng);
     void AddStop(std::string name, Coordinates coords); 
-
     void AddBus(std::string name, const std::vector<std::string>& stop_names, bool is_roundtrip); 
+    void AddDistance(const std::string& from, const std::string& to, int distance);
 
     const Bus* GetBus(std::string_view name) const;
     const Stop* GetStop(std::string_view name) const; 
@@ -37,6 +37,7 @@ public:
         size_t stops_count;
         size_t unique_stops_count; 
         double route_length; 
+        double curvature;
     };
 
     struct StopInfo {
@@ -54,6 +55,20 @@ private:
     std::unordered_map<std::string_view, const Stop*> stop_name_to_stop_;
     std::unordered_map<std::string_view, const Bus*> bus_name_to_bus_;
     std::unordered_map<const Stop*, std::set<std::string_view>> stop_to_buses_; 
+
+
+    // Хэшер для хранения расстояния между остановками
+    struct PairStopHasher {
+        size_t operator()(const std::pair<const Stop*, const Stop*>& stops) const {
+            return std::hash<const void*>{}(stops.first) * 37 +
+                std::hash<const void*>{}(stops.second);
+        }
+    };
+
+    std::unordered_map<std::pair<const Stop*, const Stop*>, int, PairStopHasher> stops_distances_;
+
+    int GetDistance(const Stop* from, const Stop* to) const;
+    
 };
 
 } // namespace transport

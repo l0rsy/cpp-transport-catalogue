@@ -23,7 +23,8 @@ void ParseAndPrintStat(const TransportCatalogue& transport_catalogue, string_vie
         if (bus_info) {
             output << bus_info->stops_count << " stops on route, "
                    << bus_info->unique_stops_count << " unique stops, "
-                   << fixed << setprecision(6) << bus_info->route_length << " route length";
+                   << static_cast<int>(bus_info->route_length) << " route length, "
+                   << fixed << setprecision(6) << bus_info->curvature << " curvature"; 
         } else {
             output << "not found";
         }

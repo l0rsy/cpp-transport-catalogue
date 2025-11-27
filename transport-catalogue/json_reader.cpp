@@ -8,10 +8,15 @@ namespace json_reader {
 
 using namespace std::literals;
 
-JsonReader::JsonReader(transport::TransportCatalogue& catalogue, std::istream& input) 
-    : catalogue_(catalogue)
-    , request_handler_(catalogue)
-    , input_doc_(json::Load(input)) {
+JsonReader::JsonReader(const std::string& json_str) 
+    : input_doc_([&json_str]() {
+        std::istringstream input(json_str);
+        return json::Load(input);
+    }()) {
+}
+
+JsonReader::JsonReader(const json::Document& doc)
+    : input_doc_(doc) {
 }
 
 void JsonReader::LoadData() {
@@ -88,13 +93,15 @@ map_renderer::RenderSettings JsonReader::GetRenderSettings() const {
     return settings;
 }
 
-void JsonReader::ProcessRequests(std::ostream& output) {
+json::Document JsonReader::ProcessRequests() {
     const auto& root_map = input_doc_.GetRoot().AsMap();
     
     if (root_map.count("stat_requests"s)) {
         json::Array responses = ProcessStatRequests(root_map.at("stat_requests"s).AsArray());
-        json::Print(json::Document(responses), output);
+        return json::Document(responses);
     }
+    
+    return json::Document(json::Array{});
 }
 
 void JsonReader::ParseBaseRequests(const json::Array& requests) {
@@ -186,11 +193,14 @@ json::Array JsonReader::ProcessStatRequests(const json::Array& requests) {
 json::Node JsonReader::ProcessMapRequest(const json::Dict& request) {
     int id = request.at("id"s).AsInt();
     
+    // Создаем RequestHandler локально
+    transport::RequestHandler request_handler(catalogue_);
+    
     // Получаем настройки рендеринга
     auto render_settings = GetRenderSettings();
     
     // Рендерим карту
-    svg::Document map_document = request_handler_.RenderMap(render_settings);
+    svg::Document map_document = request_handler.RenderMap(render_settings);
     
     // Преобразуем SVG документ в строку
     std::ostringstream svg_stream;
@@ -207,7 +217,9 @@ json::Node JsonReader::ProcessBusRequest(const json::Dict& request) {
     std::string bus_name = request.at("name"s).AsString();
     int id = request.at("id"s).AsInt();
     
-    auto bus_info = request_handler_.GetBusInfo(bus_name);
+    // Создаем RequestHandler локально
+    transport::RequestHandler request_handler(catalogue_);
+    auto bus_info = request_handler.GetBusInfo(bus_name);
     
     if (!bus_info) {
         return json::Dict{
@@ -229,7 +241,9 @@ json::Node JsonReader::ProcessStopRequest(const json::Dict& request) {
     std::string stop_name = request.at("name"s).AsString();
     int id = request.at("id"s).AsInt();
     
-    auto stop_info = request_handler_.GetStopInfo(stop_name);
+    // Создаем RequestHandler локально
+    transport::RequestHandler request_handler(catalogue_);
+    auto stop_info = request_handler.GetStopInfo(stop_name);
     
     if (!stop_info) {
         return json::Dict{
@@ -237,6 +251,7 @@ json::Node JsonReader::ProcessStopRequest(const json::Dict& request) {
             {"error_message"s, "not found"s}
         };
     }
+    
     std::vector<std::string> buses_sorted;
     for (const auto& bus_name : stop_info->buses) {
         buses_sorted.push_back(std::string(bus_name));

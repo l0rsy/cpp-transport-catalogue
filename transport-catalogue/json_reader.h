@@ -5,18 +5,30 @@
 #include "json.h"
 #include "map_renderer.h"
 
-#include <iostream>
+#include <string>
 
 namespace json_reader {
 
 class JsonReader {
 public:
-    JsonReader(transport::TransportCatalogue& catalogue, std::istream& input = std::cin);
+    // Конструктор из JSON строки
+    explicit JsonReader(const std::string& json_str);
     
+    // Конструктор из JSON документа
+    explicit JsonReader(const json::Document& doc);
+    
+    // Загрузка данных в каталог
     void LoadData();
-    void ProcessRequests(std::ostream& output = std::cout);
-
+    
+    // Обработка запросов - возвращает JSON документ с ответами
+    json::Document ProcessRequests();
+    
+    // Получение настроек рендеринга
     map_renderer::RenderSettings GetRenderSettings() const;
+    
+    // Получение каталога
+    transport::TransportCatalogue& GetCatalogue() { return catalogue_; }
+    const transport::TransportCatalogue& GetCatalogue() const { return catalogue_; }
 
 private:
     void ParseBaseRequests(const json::Array& requests);
@@ -28,8 +40,7 @@ private:
     json::Node ProcessStopRequest(const json::Dict& request);
     json::Node ProcessMapRequest(const json::Dict& request);
 
-    transport::TransportCatalogue& catalogue_;
-    transport::RequestHandler request_handler_;
+    transport::TransportCatalogue catalogue_;
     json::Document input_doc_;
 };
 

@@ -1,32 +1,28 @@
+#include "transport_catalogue.h"
+#include "request_handler.h"
+#include "json_reader.h"
 #include <iostream>
-#include <string>
-
-#include "input_reader.h"
-#include "stat_reader.h"
-
-using namespace std;
+#include <fstream>
+#include <locale>
 
 int main() {
-    TransportCatalogue catalogue;
-
-    int base_request_count;
-    cin >> base_request_count >> ws;
-
-    {
-        InputReader reader;
-        for (int i = 0; i < base_request_count; ++i) {
-            string line;
-            getline(cin, line);
-            reader.ParseLine(line);
-        }
-        reader.ApplyCommands(catalogue);
+    // Устанавливаем локаль для корректного вывода чисел
+    std::locale::global(std::locale("C"));
+    
+    transport::TransportCatalogue catalogue;
+    json_reader::JsonReader reader(catalogue, std::cin);
+    
+    try {
+        // Загружаем данные (остановки и маршруты)
+        reader.LoadData();
+        
+        // Обрабатываем запросы и выводим результат в JSON
+        reader.ProcessRequests(std::cout);
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
     }
-
-    int stat_request_count;
-    cin >> stat_request_count >> ws;
-    for (int i = 0; i < stat_request_count; ++i) {
-        string line;
-        getline(cin, line);
-        ParseAndPrintStat(catalogue, line, cout);
-    }
+    
+    return 0;
 }

@@ -6,14 +6,18 @@
 
 namespace transport {
 
-size_t TransportCatalogue::PairStopHasher::operator()(const std::pair<const Stop*, const Stop*>& stops) const {
-    return std::hash<const void*>{}(stops.first) * 37 + 
-           std::hash<const void*>{}(stops.second);
-}
+using namespace std;
 
-void TransportCatalogue::AddStop(const std::string& name, Coordinates coords) {
-    stops_.push_back({std::move(name), coords});
-    const Stop* new_stop = &stops_.back();
+size_t TransportCatalogue::PairStopHasher::operator()(const std::pair<const domain::Stop*, const domain::Stop*>& stops) const { 
+    return std::hash<const void*>{}(stops.first) * 37 +  
+        std::hash<const void*>{}(stops.second); 
+
+} 
+
+void TransportCatalogue::AddStop(const std::string& name, geo::Coordinates coords) {
+    // Важно: используем deque для сохранения указателей при добавлении новых элементов
+    stops_.push_back({name, coords});
+    const domain::Stop* new_stop = &stops_.back();
     stop_name_to_stop_[new_stop->name] = new_stop;
     
     // Инициализируем пустой набор автобусов для новой остановки
@@ -21,11 +25,11 @@ void TransportCatalogue::AddStop(const std::string& name, Coordinates coords) {
 }
 
 void TransportCatalogue::AddBus(const std::string& name, const std::vector<std::string>& stop_names, bool is_roundtrip) {
-    Bus bus;
-    bus.name = std::move(name);
+    domain::Bus bus;
+    bus.name = name;
     bus.is_roundtrip = is_roundtrip;
 
-    // Сначала находим все остановки
+    // Находим все остановки по именам
     for (const auto& stop_name : stop_names) {
         auto it = stop_name_to_stop_.find(stop_name);
         if (it != stop_name_to_stop_.end()) {
@@ -33,126 +37,169 @@ void TransportCatalogue::AddBus(const std::string& name, const std::vector<std::
         }
     }
     
-    // Добавляем автобус в основное хранилище
-    buses_.push_back(std::move(bus));
-    const Bus* new_bus = &buses_.back();
+    // Добавляем автобус в хранилище
+    buses_.push_back(move(bus));
+    const domain::Bus* new_bus = &buses_.back();
     
-    // Теперь сохраняем индексы
+    // Обновляем индексы
     bus_name_to_bus_[new_bus->name] = new_bus;
     
     // Добавляем автобус во все его остановки
-    for (const Stop* stop : new_bus->stops) {
+    for (const domain::Stop* stop : new_bus->stops) {
         stop_to_buses_[stop].insert(new_bus->name);
     }
 }
 
 void TransportCatalogue::AddDistance(const std::string& from, const std::string& to, int distance) {
-    const Stop* stop_from = GetStop(from);
-    const Stop* stop_to = GetStop(to);
+    const domain::Stop* stop_from = GetStop(from);
+    const domain::Stop* stop_to = GetStop(to);
     if (stop_from && stop_to) {
         stops_distances_[{stop_from, stop_to}] = distance;
     }
 }
 
-const Bus* TransportCatalogue::GetBus(std::string_view name) const {
+const domain::Bus* TransportCatalogue::GetBus(string_view name) const {
     auto it = bus_name_to_bus_.find(name);
-    if (it != bus_name_to_bus_.end()) {
-        return it->second;
-    }
-    return nullptr;
+    return it != bus_name_to_bus_.end() ? it->second : nullptr;
 }
 
-const Stop* TransportCatalogue::GetStop(std::string_view name) const {
+const domain::Stop* TransportCatalogue::GetStop(string_view name) const {
     auto it = stop_name_to_stop_.find(name);
-    if (it != stop_name_to_stop_.end()) {
-        return it->second;
-    }
-    return nullptr;
+    return it != stop_name_to_stop_.end() ? it->second : nullptr;
 }
 
-
-int TransportCatalogue::GetDistance(const Stop* from, const Stop* to) const {
-    // Поиск от А до Б
+int TransportCatalogue::GetDistance(const domain::Stop* from, const domain::Stop* to) const {
+    // Сначала ищем прямое расстояние
     auto it = stops_distances_.find({from, to});
     if (it != stops_distances_.end()) {
         return it->second;
     }
-    // Поиск от Б до А
+    // Если не найдено, ищем обратное расстояние
     it = stops_distances_.find({to, from});
     if (it != stops_distances_.end()) {
         return it->second;
     }
-    // Если расстояние между остановками не было задано, то находим географическое расстояние
-    return static_cast<int>(ComputeDistance(from->coordinates, to->coordinates));
+    // Если расстояние не задано, вычисляем географическое
+    double geo_dist = geo::ComputeDistance(from->coordinates, to->coordinates);
+    int result = static_cast<int>(geo_dist);
+    return result;
 }
 
-std::optional<TransportCatalogue::BusInfo> TransportCatalogue::GetBusInfo(std::string_view bus_name) const {
-    const Bus* bus = GetBus(bus_name);
+optional<domain::BusInfo> TransportCatalogue::GetBusInfo(string_view bus_name) const {
+    const domain::Bus* bus = GetBus(bus_name);
     if (!bus || bus->stops.empty()) {
-        return std::nullopt;
+        return nullopt;
     }
 
-    BusInfo info;
+    domain::BusInfo info;
 
+    // Вычисляем количество остановок
     if (bus->is_roundtrip) {
         info.stops_count = bus->stops.size();
     } else {
         info.stops_count = bus->stops.size() * 2 - 1;
     }
 
-    std::unordered_set<const Stop*> unique_stops(bus->stops.begin(), bus->stops.end());
+    // Вычисляем количество уникальных остановок
+    unordered_set<const domain::Stop*> unique_stops(bus->stops.begin(), bus->stops.end());
     info.unique_stops_count = unique_stops.size();
 
-    // Вычисляем длину дорожного пути
+    // Вычисляем длины маршрутов
     double road_length = 0.0;
-    for (size_t i = 1; i < bus->stops.size(); i++) { 
-        const Stop* from = bus->stops[i - 1];
-        const Stop* to = bus->stops[i];
-        road_length += GetDistance(from, to);
-    }
-
-    if (!bus->is_roundtrip) {
-        for (size_t i = bus->stops.size() - 1; i > 0; --i) {
-            const Stop* from = bus->stops[i];
-            const Stop* to = bus->stops[i - 1];
-            road_length += GetDistance(from, to);
-        }
-    }
-    info.route_length = road_length;
-
-    // Вычисляем географическую длину (для извилистости)
     double geo_length = 0.0;
-    for (size_t i = 1; i < bus->stops.size(); i++) { 
-        const Stop* from = bus->stops[i - 1];
-        const Stop* to = bus->stops[i];
-        geo_length += ComputeDistance(from->coordinates, to->coordinates);
-    }
-    if (!bus->is_roundtrip) {
+
+    if (bus->is_roundtrip) {
+        // Кольцевой маршрут
+        for (size_t i = 1; i < bus->stops.size(); ++i) {
+            const domain::Stop* from = bus->stops[i - 1];
+            const domain::Stop* to = bus->stops[i];
+            
+            int dist = GetDistance(from, to);
+            double geo_dist = geo::ComputeDistance(from->coordinates, to->coordinates);
+            
+            road_length += dist;
+            geo_length += geo_dist;
+        }
+    } else {
+        // Прямой путь
+        for (size_t i = 1; i < bus->stops.size(); ++i) {
+            const domain::Stop* from = bus->stops[i - 1];
+            const domain::Stop* to = bus->stops[i];
+            
+            int dist = GetDistance(from, to);
+            double geo_dist = geo::ComputeDistance(from->coordinates, to->coordinates);
+            
+            road_length += dist;
+            geo_length += geo_dist;
+            
+        }
+
         for (size_t i = bus->stops.size() - 1; i > 0; --i) {
-            const Stop* from = bus->stops[i];
-            const Stop* to = bus->stops[i - 1];
-            geo_length += ComputeDistance(from->coordinates, to->coordinates);
+            const domain::Stop* from = bus->stops[i];
+            const domain::Stop* to = bus->stops[i - 1];
+            
+            int dist = GetDistance(from, to);
+            double geo_dist = geo::ComputeDistance(from->coordinates, to->coordinates);
+            
+            road_length += dist;
+            geo_length += geo_dist;
+            
         }
     }
-    info.curvature = road_length / geo_length;
+
+    info.route_length = road_length;
+    
+    if (geo_length > 0) {
+        info.curvature = road_length / geo_length;
+    } else {
+        info.curvature = 1.0;
+    }
 
     return info;
 }
 
-std::optional<TransportCatalogue::StopInfo> TransportCatalogue::GetStopInfo(std::string_view stop_name) const {
-    const Stop* stop = GetStop(stop_name);
+optional<domain::StopInfo> TransportCatalogue::GetStopInfo(string_view stop_name) const {
+    const domain::Stop* stop = GetStop(stop_name);
     if (!stop) {
-        return std::nullopt;
+        return nullopt;
     }
 
-    StopInfo info;
+    domain::StopInfo info;
     
     auto it = stop_to_buses_.find(stop);
     if (it != stop_to_buses_.end()) {
-        info.buses = it->second;
+        for (const auto& bus_name : it->second) {
+            info.buses.insert(string(bus_name));
+        }
     }
     
     return info;
+}
+
+vector<const domain::Bus*> TransportCatalogue::GetAllBusesSorted() const {
+    vector<const domain::Bus*> result;
+    for (const auto& [name, bus] : bus_name_to_bus_) {
+        result.push_back(bus);
+    }
+    
+    // Сортируем по имени
+    sort(result.begin(), result.end(), [](const domain::Bus* lhs, const domain::Bus* rhs) {
+        return lhs->name < rhs->name;
+    });
+    
+    return result;
+}
+
+vector<const domain::Stop*> TransportCatalogue::GetStopsUsedInRoutes() const {
+    vector<const domain::Stop*> result;
+    
+    for (const auto& [stop, buses] : stop_to_buses_) {
+        if (!buses.empty()) {
+            result.push_back(stop);
+        }
+    }
+    
+    return result;
 }
 
 } // namespace transport

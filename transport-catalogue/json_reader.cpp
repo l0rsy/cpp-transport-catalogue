@@ -1,4 +1,5 @@
 #include "json_reader.h"
+#include "json_builder.h"
 #include <algorithm>
 #include <string>
 #include <iomanip>
@@ -190,66 +191,50 @@ json::Array JsonReader::ProcessStatRequests(const json::Array& requests) {
     return responses;
 }
 
-json::Node JsonReader::ProcessMapRequest(const json::Dict& request) {
-    int id = request.at("id"s).AsInt();
-    
-    // Создаем RequestHandler локально
-    transport::RequestHandler request_handler(catalogue_);
-    
-    // Получаем настройки рендеринга
-    auto render_settings = GetRenderSettings();
-    
-    // Рендерим карту
-    svg::Document map_document = request_handler.RenderMap(render_settings);
-    
-    // Преобразуем SVG документ в строку
-    std::ostringstream svg_stream;
-    map_document.Render(svg_stream);
-    std::string svg_string = svg_stream.str();
-    
-    return json::Dict{
-        {"map"s, svg_string},
-        {"request_id"s, id}
-    };
-}
-
 json::Node JsonReader::ProcessBusRequest(const json::Dict& request) {
     std::string bus_name = request.at("name"s).AsString();
     int id = request.at("id"s).AsInt();
     
-    // Создаем RequestHandler локально
     transport::RequestHandler request_handler(catalogue_);
     auto bus_info = request_handler.GetBusInfo(bus_name);
     
     if (!bus_info) {
-        return json::Dict{
-            {"request_id"s, id},
-            {"error_message"s, "not found"s}
-        };
+        // Используем Builder для ошибки
+        return json::Builder{}
+            .StartDict()
+                .Key("request_id"s).Value(id)
+                .Key("error_message"s).Value("not found"s)
+            .EndDict()
+            .Build();
     }
     
-    return json::Dict{
-        {"curvature"s, bus_info->curvature},
-        {"request_id"s, id},
-        {"route_length"s, static_cast<int>(bus_info->route_length)},
-        {"stop_count"s, static_cast<int>(bus_info->stops_count)},
-        {"unique_stop_count"s, static_cast<int>(bus_info->unique_stops_count)}
-    };
+    // Используем Builder для успешного ответа
+    return json::Builder{}
+        .StartDict()
+            .Key("curvature"s).Value(bus_info->curvature)
+            .Key("request_id"s).Value(id)
+            .Key("route_length"s).Value(static_cast<int>(bus_info->route_length))
+            .Key("stop_count"s).Value(static_cast<int>(bus_info->stops_count))
+            .Key("unique_stop_count"s).Value(static_cast<int>(bus_info->unique_stops_count))
+        .EndDict()
+        .Build();
 }
 
 json::Node JsonReader::ProcessStopRequest(const json::Dict& request) {
     std::string stop_name = request.at("name"s).AsString();
     int id = request.at("id"s).AsInt();
     
-    // Создаем RequestHandler локально
     transport::RequestHandler request_handler(catalogue_);
     auto stop_info = request_handler.GetStopInfo(stop_name);
     
     if (!stop_info) {
-        return json::Dict{
-            {"request_id"s, id},
-            {"error_message"s, "not found"s}
-        };
+        // Используем Builder для ошибки
+        return json::Builder{}
+            .StartDict()
+                .Key("request_id"s).Value(id)
+                .Key("error_message"s).Value("not found"s)
+            .EndDict()
+            .Build();
     }
     
     std::vector<std::string> buses_sorted;
@@ -263,10 +248,33 @@ json::Node JsonReader::ProcessStopRequest(const json::Dict& request) {
         buses_array.push_back(bus_name);
     }
     
-    return json::Dict{
-        {"buses"s, buses_array},
-        {"request_id"s, id}
-    };
+    // Используем Builder для успешного ответа
+    return json::Builder{}
+        .StartDict()
+            .Key("buses"s).Value(std::move(buses_array))  // Перемещаем массив
+            .Key("request_id"s).Value(id)
+        .EndDict()
+        .Build();
+}
+
+json::Node JsonReader::ProcessMapRequest(const json::Dict& request) {
+    int id = request.at("id"s).AsInt();
+    
+    transport::RequestHandler request_handler(catalogue_);
+    auto render_settings = GetRenderSettings();
+    svg::Document map_document = request_handler.RenderMap(render_settings);
+    
+    std::ostringstream svg_stream;
+    map_document.Render(svg_stream);
+    std::string svg_string = svg_stream.str();
+    
+    // Используем Builder для ответа
+    return json::Builder{}
+        .StartDict()
+            .Key("map"s).Value(svg_string)
+            .Key("request_id"s).Value(id)
+        .EndDict()
+        .Build();
 }
 
 } // namespace json_reader

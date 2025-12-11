@@ -3,82 +3,123 @@
 
 namespace json {
 
-// Реализация методов Builder
+Node* Builder::GetCurrentNode() {
+    if (nodes_stack_.empty()) {
+        return &root_;
+    }
+    return nodes_stack_.back();
+}
 
-DictItemContext Builder::StartDict() {
-    CheckNotComplete();
+bool Builder::IsDictContext() const {
+    if (nodes_stack_.empty()) {
+        // Корневой контекст - не словарь
+        return false;
+    }
+    return nodes_stack_.back()->IsMap();
+}
+
+bool Builder::IsArrayContext() const {
+    if (nodes_stack_.empty()) {
+        // Корневой контекст - не массив
+        return false;
+    }
+    return nodes_stack_.back()->IsArray();
+}
+
+bool Builder::IsComplete() const {
+    return nodes_stack_.empty() && !root_.IsNull();
+}
+
+void Builder::AddValue(Node value) {
+    if (IsComplete()) {
+        throw std::logic_error("Builder is already complete");
+    }
+    
+    if (nodes_stack_.empty()) {
+        // Корневое значение
+        root_ = std::move(value);
+        return;
+    }
+    
+    Node* current = nodes_stack_.back();
+    
+    if (current->IsArray()) {
+        // Добавляем в массив
+        auto& array = const_cast<Array&>(current->AsArray());
+        array.push_back(std::move(value));
+    } else if (current->IsMap() && expecting_value_) {
+        // Добавляем в словарь по ключу
+        auto& dict = const_cast<Dict&>(current->AsMap());
+        dict[keys_.back()] = std::move(value);
+        keys_.pop_back();
+        expecting_value_ = false;
+    } else {
+        throw std::logic_error("Value can't be added in current context");
+    }
+}
+
+Builder::DictItemContext Builder::StartDict() {
+    if (IsComplete()) {
+        throw std::logic_error("Builder is already complete");
+    }
     
     Node dict_node{Dict{}};
     
-    if (stack_.empty()) {
+    if (nodes_stack_.empty()) {
+        // Корневой словарь
         root_ = std::move(dict_node);
-        stack_.push_back({&root_, State::DICT_KEY});
+        nodes_stack_.push_back(&root_);
     } else {
-        auto current_state = GetCurrentState();
-        if (current_state == State::DICT_VALUE) {
-            auto* current_node = GetCurrentNode();
-            if (!current_node->IsMap()) {
-                throw std::logic_error("Current node is not a dict");
-            }
-            
-            auto& dict = const_cast<Dict&>(current_node->AsMap());
-            auto it = dict.emplace(std::move(last_key_), std::move(dict_node)).first;
-            last_key_.clear();
-            stack_.back().state = State::DICT_KEY;
-            stack_.push_back({&it->second, State::DICT_KEY});
-            
-        } else if (current_state == State::ARRAY) {
-            auto* current_node = GetCurrentNode();
-            if (!current_node->IsArray()) {
-                throw std::logic_error("Current node is not an array");
-            }
-            
-            auto& array = const_cast<Array&>(current_node->AsArray());
-            array.emplace_back(std::move(dict_node));
-            stack_.push_back({&array.back(), State::DICT_KEY});
-            
+        Node* current = GetCurrentNode();
+        
+        if (current->IsArray()) {
+            // Добавляем словарь в массив
+            auto& array = const_cast<Array&>(current->AsArray());
+            array.push_back(std::move(dict_node));
+            nodes_stack_.push_back(&array.back());
+        } else if (current->IsMap() && expecting_value_) {
+            // Добавляем словарь как значение для ключа
+            auto& dict = const_cast<Dict&>(current->AsMap());
+            dict[keys_.back()] = std::move(dict_node);
+            nodes_stack_.push_back(&dict[keys_.back()]);
+            keys_.pop_back();
+            expecting_value_ = false;
         } else {
-            throw std::logic_error("StartDict can only be called in dict after Key or in array");
+            throw std::logic_error("StartDict can't be called in current context");
         }
     }
     
     return DictItemContext(*this);
 }
 
-ArrayItemContext Builder::StartArray() {
-    CheckNotComplete();
+Builder::ArrayItemContext Builder::StartArray() {
+    if (IsComplete()) {
+        throw std::logic_error("Builder is already complete");
+    }
     
     Node array_node{Array{}};
     
-    if (stack_.empty()) {
+    if (nodes_stack_.empty()) {
+        // Корневой массив
         root_ = std::move(array_node);
-        stack_.push_back({&root_, State::ARRAY});
+        nodes_stack_.push_back(&root_);
     } else {
-        auto current_state = GetCurrentState();
-        if (current_state == State::DICT_VALUE) {
-            auto* current_node = GetCurrentNode();
-            if (!current_node->IsMap()) {
-                throw std::logic_error("Current node is not a dict");
-            }
-            
-            auto& dict = const_cast<Dict&>(current_node->AsMap());
-            auto it = dict.emplace(std::move(last_key_), std::move(array_node)).first;
-            last_key_.clear();
-            stack_.back().state = State::DICT_KEY;
-            stack_.push_back({&it->second, State::ARRAY});
-            
-        } else if (current_state == State::ARRAY) {
-            auto* current_node = GetCurrentNode();
-            if (!current_node->IsArray()) {
-                throw std::logic_error("Current node is not an array");
-            }
-            
-            auto& array = const_cast<Array&>(current_node->AsArray());
-            array.emplace_back(std::move(array_node));
-            stack_.push_back({&array.back(), State::ARRAY});
-            
+        Node* current = GetCurrentNode();
+        
+        if (current->IsArray()) {
+            // Добавляем массив в массив
+            auto& array = const_cast<Array&>(current->AsArray());
+            array.push_back(std::move(array_node));
+            nodes_stack_.push_back(&array.back());
+        } else if (current->IsMap() && expecting_value_) {
+            // Добавляем массив как значение для ключа
+            auto& dict = const_cast<Dict&>(current->AsMap());
+            dict[keys_.back()] = std::move(array_node);
+            nodes_stack_.push_back(&dict[keys_.back()]);
+            keys_.pop_back();
+            expecting_value_ = false;
         } else {
-            throw std::logic_error("StartArray can only be called in dict after Key or in array");
+            throw std::logic_error("StartArray can't be called in current context");
         }
     }
     
@@ -86,218 +127,131 @@ ArrayItemContext Builder::StartArray() {
 }
 
 Builder& Builder::Value(Node value) {
-    CheckNotComplete();
+    if (IsComplete()) {
+        throw std::logic_error("Builder is already complete");
+    }
     
-    if (stack_.empty()) {
-        // Если стек пуст, это корневое значение
+    if (nodes_stack_.empty()) {
+        // Корневое значение
         root_ = std::move(value);
-        stack_.push_back({&root_, State::COMPLETE});
         return *this;
     }
     
-    auto current_state = GetCurrentState();
-    if (current_state == State::DICT_VALUE) {
-        // Добавляем значение в словарь
-        if (last_key_.empty()) {
-            throw std::logic_error("Key not set before value in dict");
-        }
-        
-        auto* current_node = GetCurrentNode();
-        if (!current_node->IsMap()) {
-            throw std::logic_error("Current node is not a dict");
-        }
-        
-        auto& dict = const_cast<Dict&>(current_node->AsMap());
-        dict.emplace(std::move(last_key_), std::move(value));
-        last_key_.clear();
-        stack_.back().state = State::DICT_KEY;
+    Node* current = GetCurrentNode();
+    
+    if (current->IsArray()) {
+        // Добавляем в массив
+        auto& array = const_cast<Array&>(current->AsArray());
+        array.push_back(std::move(value));
         return *this;
-        
-    } else if (current_state == State::ARRAY) {
-        // Добавляем значение в массив
-        auto* current_node = GetCurrentNode();
-        if (!current_node->IsArray()) {
-            throw std::logic_error("Current node is not an array");
-        }
-        
-        auto& array = const_cast<Array&>(current_node->AsArray());
-        array.emplace_back(std::move(value));
+    } else if (current->IsMap() && expecting_value_) {
+        // Добавляем в словарь по ключу
+        auto& dict = const_cast<Dict&>(current->AsMap());
+        dict[keys_.back()] = std::move(value);
+        keys_.pop_back();
+        expecting_value_ = false;
         return *this;
     }
     
-    throw std::logic_error("Value can only be called in dict after Key or in array");
+    throw std::logic_error("Value can't be added in current context");
 }
 
-DictKeyContext Builder::Key(std::string key) {
-    CheckNotComplete();
-    
-    if (GetCurrentState() != State::DICT_KEY) {
-        throw std::logic_error("Key can only be called inside a dict");
+Builder::DictKeyContext Builder::Key(std::string key) {
+    if (IsComplete()) {
+        throw std::logic_error("Builder is already complete");
     }
     
-    last_key_ = std::move(key);
-    stack_.back().state = State::DICT_VALUE;
+    if (!IsDictContext() || expecting_value_) {
+        throw std::logic_error("Key can only be called in dict context without pending value");
+    }
+    
+    keys_.push_back(std::move(key));
+    expecting_value_ = true;
     
     return DictKeyContext(*this);
 }
 
-// json_builder.cpp - исправленный EndDict()
 Builder& Builder::EndDict() {
-    CheckNotComplete();
-    
-    if (GetCurrentState() != State::DICT_KEY) {
-        // Допустим также DICT_VALUE? Нет, потому что тогда есть незавершенный ключ
-        throw std::logic_error("EndDict can only be called inside a dict");
+    if (IsComplete()) {
+        throw std::logic_error("Builder is already complete");
     }
     
-    // Проверка незавершенного ключа
-    if (GetCurrentState() == State::DICT_VALUE && !last_key_.empty()) {
-        throw std::logic_error("Dict key without value");
+    if (!IsDictContext() || expecting_value_) {
+        throw std::logic_error("EndDict can only be called in dict context without pending key");
     }
     
-    stack_.pop_back();
-    if (stack_.empty()) {
-        // Если стек пуст, значит мы закончили корневой словарь
-        stack_.push_back({&root_, State::COMPLETE});
-    } else {
-        // Обновляем состояние родительского элемента
-        auto current_state = GetCurrentState();
-        if (current_state == State::DICT_VALUE) {
-            // Мы только что завершили значение для ключа в родительском словаре
-            last_key_.clear();
-            stack_.back().state = State::DICT_KEY;
-        }
-        // Для массива состояние остается ARRAY
+    if (!nodes_stack_.empty()) {
+        nodes_stack_.pop_back();
     }
     
     return *this;
 }
+
 Builder& Builder::EndArray() {
-    CheckNotComplete();
-    
-    if (GetCurrentState() != State::ARRAY) {
-        throw std::logic_error("EndArray can only be called inside an array");
+    if (IsComplete()) {
+        throw std::logic_error("Builder is already complete");
     }
     
-    stack_.pop_back();
-    if (stack_.empty()) {
-        stack_.push_back({&root_, State::COMPLETE});
+    if (!IsArrayContext()) {
+        throw std::logic_error("EndArray can only be called in array context");
+    }
+    
+    if (!nodes_stack_.empty()) {
+        nodes_stack_.pop_back();
     }
     
     return *this;
 }
 
 Node Builder::Build() {
-    CheckComplete();
+    if (!IsComplete()) {
+        throw std::logic_error("JSON document is not complete");
+    }
     
-    if (stack_.empty() || GetCurrentState() != State::COMPLETE) {
-        throw std::logic_error("Attempt to build incomplete JSON");
+    if (root_.IsNull()) {
+        throw std::logic_error("Empty JSON document");
     }
     
     return std::move(root_);
 }
 
-Node* Builder::GetCurrentNode() {
-    if (stack_.empty()) {
-        return &root_;
-    }
-    return stack_.back().node;
-}
+// Реализация методов контекстных классов
 
-Builder::State Builder::GetCurrentState() const {
-    if (stack_.empty()) {
-        return State::EMPTY;
-    }
-    return stack_.back().state;
-}
-
-void Builder::CheckNotComplete() const {
-    if (!stack_.empty() && stack_.back().state == State::COMPLETE) {
-        throw std::logic_error("Builder is already complete");
-    }
-}
-
-void Builder::CheckComplete() const {
-    if (stack_.empty() || stack_.back().state != State::COMPLETE) {
-        throw std::logic_error("JSON is not complete");
-    }
-}
-
-// Вспомогательный метод для добавления значения в словаре
-DictItemContext Builder::ValueInDict(Node value) {
-    CheckNotComplete();
-    
-    if (GetCurrentState() != State::DICT_VALUE) {
-        throw std::logic_error("Value can only be called after Key in dict");
-    }
-    
-    auto* current_node = GetCurrentNode();
-    if (!current_node->IsMap()) {
-        throw std::logic_error("Current node is not a dict");
-    }
-    
-    auto& dict = const_cast<Dict&>(current_node->AsMap());
-    dict.emplace(std::move(last_key_), std::move(value));
-    last_key_.clear();
-    stack_.back().state = State::DICT_KEY;
-    
-    return DictItemContext(*this);
-}
-
-// Вспомогательный метод для добавления значения в массиве
-ArrayItemContext Builder::ValueInArray(Node value) {
-    CheckNotComplete();
-    
-    if (GetCurrentState() != State::ARRAY) {
-        throw std::logic_error("Value can only be called in array");
-    }
-    
-    auto* current_node = GetCurrentNode();
-    if (!current_node->IsArray()) {
-        throw std::logic_error("Current node is not an array");
-    }
-    
-    auto& array = const_cast<Array&>(current_node->AsArray());
-    array.emplace_back(std::move(value));
-    
-    return ArrayItemContext(*this);
-}
-
-// Реализация методов контекстов
-
-DictKeyContext DictItemContext::Key(std::string key) {
+Builder::DictKeyContext Builder::DictItemContext::Key(std::string key) {
     return builder_.Key(std::move(key));
 }
 
-Builder& DictItemContext::EndDict() {
+Builder& Builder::DictItemContext::EndDict() {
     return builder_.EndDict();
 }
 
-DictItemContext DictKeyContext::Value(Node value) {
-    return builder_.ValueInDict(std::move(value));
+Builder::DictItemContext Builder::DictKeyContext::Value(Node value) {
+    builder_.Value(std::move(value));
+    return Builder::DictItemContext(builder_);
 }
 
-DictItemContext DictKeyContext::StartDict() {
+Builder::DictItemContext Builder::DictKeyContext::StartDict() {
     return builder_.StartDict();
 }
 
-ArrayItemContext DictKeyContext::StartArray() {
+Builder::ArrayItemContext Builder::DictKeyContext::StartArray() {
     return builder_.StartArray();
 }
 
-ArrayItemContext ArrayItemContext::Value(Node value) {
-    return builder_.ValueInArray(std::move(value));
+Builder::ArrayItemContext Builder::ArrayItemContext::Value(Node value) {
+    builder_.Value(std::move(value));
+    return Builder::ArrayItemContext(builder_);
 }
 
-DictItemContext ArrayItemContext::StartDict() {
+Builder::DictItemContext Builder::ArrayItemContext::StartDict() {
     return builder_.StartDict();
 }
 
-ArrayItemContext ArrayItemContext::StartArray() {
+Builder::ArrayItemContext Builder::ArrayItemContext::StartArray() {
     return builder_.StartArray();
 }
 
-Builder& ArrayItemContext::EndArray() {
+Builder& Builder::ArrayItemContext::EndArray() {
     return builder_.EndArray();
 }
 

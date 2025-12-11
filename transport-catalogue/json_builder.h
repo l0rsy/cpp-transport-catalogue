@@ -7,22 +7,25 @@
 
 namespace json {
 
-// Вспомогательные классы контекстов
-class BaseContext;
-class DictItemContext;
-class DictKeyContext;
-class ArrayItemContext;
-
 class Builder {
 public:
     Builder() = default;
-    
+
+    // Контекстные классы
+    class DictItemContext;
+    class DictKeyContext;
+    class ArrayItemContext;
+
     // Методы, доступные из корневого контекста
     DictItemContext StartDict();
     ArrayItemContext StartArray();
+
     Builder& Value(Node value);
-    
-    // Перегрузки Value для простых типов
+    Builder& EndDict();
+    Builder& EndArray();
+
+    DictKeyContext Key(std::string key);
+
     Builder& Value(int value) {
         return Value(Node(value));
     }
@@ -55,96 +58,44 @@ public:
         return Value(Node(std::move(value)));
     }
     
-    // Методы, доступные только из определенных контекстов
-    DictKeyContext Key(std::string key);
-    Builder& EndDict();
-    Builder& EndArray();
-    
     Node Build();
     
 private:
-    friend class BaseContext;
-    friend class DictItemContext;
-    friend class DictKeyContext;
-    friend class ArrayItemContext;
-    
-    enum class State {
-        EMPTY,
-        DICT_KEY,
-        DICT_VALUE,
-        ARRAY,
-        COMPLETE
-    };
-    
-    struct Context {
-        Node* node;
-        State state;
-    };
-    
+    // Приватные данные для управления состоянием
     Node root_;
-    std::vector<Context> stack_;
-    std::string last_key_;
+    std::vector<Node*> nodes_stack_;  // Стек указателей на узлы
+    std::vector<std::string> keys_;   // Стек ключей для словарей
+    bool expecting_value_ = false;    // Ожидаем ли значение после ключа
+    
+    void AddValue(Node value);
     
     Node* GetCurrentNode();
-    State GetCurrentState() const;
-    void CheckNotComplete() const;
-    void CheckComplete() const;
-    
-    // Вспомогательные методы для добавления значений в разных контекстах
-    DictItemContext ValueInDict(Node value);
-    ArrayItemContext ValueInArray(Node value);
+    bool IsDictContext() const;
+    bool IsArrayContext() const;
+    bool IsComplete() const;
 };
 
 // Базовый класс контекста
-class BaseContext {
+class Builder::DictItemContext {
 public:
-    BaseContext(Builder& builder) : builder_(builder) {}
-    
-protected:
-    Builder& builder_;
-    
-    // Запрещаем вызовы методов в неправильных контекстах
-    Builder& StartDict() = delete;
-    Builder& StartArray() = delete;
-    Builder& Value(Node) = delete;
-    Builder& Key(std::string) = delete;
-    Builder& EndDict() = delete;
-    Builder& EndArray() = delete;
-};
-
-// Контекст для словаря (после StartDict)
-class DictItemContext : public BaseContext {
-public:
-    using BaseContext::BaseContext;
+    DictItemContext(Builder& builder) : builder_(builder) {}
     
     // В словаре можно только Key или EndDict
     DictKeyContext Key(std::string key);
     Builder& EndDict();
     
-    // Запрещаем остальные методы
-    Builder& StartDict() = delete;
-    Builder& StartArray() = delete;
-    Builder& Value(Node) = delete;
-    Builder& EndArray() = delete;
+private:
+    Builder& builder_;
 };
 
 // Контекст после Key в словаре
-class DictKeyContext : public BaseContext {
+class Builder::DictKeyContext {
 public:
-    using BaseContext::BaseContext;
+    DictKeyContext(Builder& builder) : builder_(builder) {}
     
     // После Key можно Value, StartDict или StartArray
     DictItemContext Value(Node value);
-    
-    // Перегрузки для поддержки Array и Dict
-    DictItemContext Value(Array value) {
-        return Value(Node(std::move(value)));
-    }
-    
-    DictItemContext Value(Dict value) {
-        return Value(Node(std::move(value)));
-    }
-    
+
     DictItemContext Value(int value) {
         return Value(Node(value));
     }
@@ -169,32 +120,29 @@ public:
         return Value(Node(nullptr));
     }
     
+    DictItemContext Value(Array value) {
+        return Value(Node(std::move(value)));
+    }
+    
+    DictItemContext Value(Dict value) {
+        return Value(Node(std::move(value)));
+    }
+    
     DictItemContext StartDict();
     ArrayItemContext StartArray();
     
-    // Запрещаем остальные методы
-    Builder& Key(std::string) = delete;
-    Builder& EndDict() = delete;
-    Builder& EndArray() = delete;
+private:
+    Builder& builder_;
 };
 
 // Контекст для массива (после StartArray)
-class ArrayItemContext : public BaseContext {
+class Builder::ArrayItemContext {
 public:
-    using BaseContext::BaseContext;
+    ArrayItemContext(Builder& builder) : builder_(builder) {}
     
     // В массиве можно Value, StartDict, StartArray или EndArray
     ArrayItemContext Value(Node value);
-    
-    // Перегрузки для поддержки Array и Dict
-    ArrayItemContext Value(Array value) {
-        return Value(Node(std::move(value)));
-    }
-    
-    ArrayItemContext Value(Dict value) {
-        return Value(Node(std::move(value)));
-    }
-    
+
     ArrayItemContext Value(int value) {
         return Value(Node(value));
     }
@@ -219,13 +167,20 @@ public:
         return Value(Node(nullptr));
     }
     
+    ArrayItemContext Value(Array value) {
+        return Value(Node(std::move(value)));
+    }
+    
+    ArrayItemContext Value(Dict value) {
+        return Value(Node(std::move(value)));
+    }
+    
     DictItemContext StartDict();
     ArrayItemContext StartArray();
     Builder& EndArray();
     
-    // Запрещаем остальные методы
-    Builder& Key(std::string) = delete;
-    Builder& EndDict() = delete;
+private:
+    Builder& builder_;
 };
 
 } // namespace json

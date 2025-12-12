@@ -3,6 +3,7 @@
 
 namespace json {
 
+// Вспомогательные методы Builder
 Node* Builder::GetCurrentNode() {
     if (nodes_stack_.empty()) {
         return &root_;
@@ -12,7 +13,6 @@ Node* Builder::GetCurrentNode() {
 
 bool Builder::IsDictContext() const {
     if (nodes_stack_.empty()) {
-        // Корневой контекст - не словарь
         return false;
     }
     return nodes_stack_.back()->IsMap();
@@ -20,7 +20,6 @@ bool Builder::IsDictContext() const {
 
 bool Builder::IsArrayContext() const {
     if (nodes_stack_.empty()) {
-        // Корневой контекст - не массив
         return false;
     }
     return nodes_stack_.back()->IsArray();
@@ -36,7 +35,6 @@ void Builder::AddValue(Node value) {
     }
     
     if (nodes_stack_.empty()) {
-        // Корневое значение
         root_ = std::move(value);
         return;
     }
@@ -44,11 +42,9 @@ void Builder::AddValue(Node value) {
     Node* current = nodes_stack_.back();
     
     if (current->IsArray()) {
-        // Добавляем в массив
         auto& array = const_cast<Array&>(current->AsArray());
         array.push_back(std::move(value));
     } else if (current->IsMap() && expecting_value_) {
-        // Добавляем в словарь по ключу
         auto& dict = const_cast<Dict&>(current->AsMap());
         dict[keys_.back()] = std::move(value);
         keys_.pop_back();
@@ -58,6 +54,7 @@ void Builder::AddValue(Node value) {
     }
 }
 
+// Основные методы Builder
 Builder::DictItemContext Builder::StartDict() {
     if (IsComplete()) {
         throw std::logic_error("Builder is already complete");
@@ -66,19 +63,16 @@ Builder::DictItemContext Builder::StartDict() {
     Node dict_node{Dict{}};
     
     if (nodes_stack_.empty()) {
-        // Корневой словарь
         root_ = std::move(dict_node);
         nodes_stack_.push_back(&root_);
     } else {
         Node* current = GetCurrentNode();
         
         if (current->IsArray()) {
-            // Добавляем словарь в массив
             auto& array = const_cast<Array&>(current->AsArray());
             array.push_back(std::move(dict_node));
             nodes_stack_.push_back(&array.back());
         } else if (current->IsMap() && expecting_value_) {
-            // Добавляем словарь как значение для ключа
             auto& dict = const_cast<Dict&>(current->AsMap());
             dict[keys_.back()] = std::move(dict_node);
             nodes_stack_.push_back(&dict[keys_.back()]);
@@ -100,19 +94,16 @@ Builder::ArrayItemContext Builder::StartArray() {
     Node array_node{Array{}};
     
     if (nodes_stack_.empty()) {
-        // Корневой массив
         root_ = std::move(array_node);
         nodes_stack_.push_back(&root_);
     } else {
         Node* current = GetCurrentNode();
         
         if (current->IsArray()) {
-            // Добавляем массив в массив
             auto& array = const_cast<Array&>(current->AsArray());
             array.push_back(std::move(array_node));
             nodes_stack_.push_back(&array.back());
         } else if (current->IsMap() && expecting_value_) {
-            // Добавляем массив как значение для ключа
             auto& dict = const_cast<Dict&>(current->AsMap());
             dict[keys_.back()] = std::move(array_node);
             nodes_stack_.push_back(&dict[keys_.back()]);
@@ -132,7 +123,6 @@ Builder& Builder::Value(Node value) {
     }
     
     if (nodes_stack_.empty()) {
-        // Корневое значение
         root_ = std::move(value);
         return *this;
     }
@@ -140,12 +130,10 @@ Builder& Builder::Value(Node value) {
     Node* current = GetCurrentNode();
     
     if (current->IsArray()) {
-        // Добавляем в массив
         auto& array = const_cast<Array&>(current->AsArray());
         array.push_back(std::move(value));
         return *this;
     } else if (current->IsMap() && expecting_value_) {
-        // Добавляем в словарь по ключу
         auto& dict = const_cast<Dict&>(current->AsMap());
         dict[keys_.back()] = std::move(value);
         keys_.pop_back();
@@ -213,46 +201,6 @@ Node Builder::Build() {
     }
     
     return std::move(root_);
-}
-
-// Реализация методов контекстных классов
-
-Builder::DictKeyContext Builder::DictItemContext::Key(std::string key) {
-    return builder_.Key(std::move(key));
-}
-
-Builder& Builder::DictItemContext::EndDict() {
-    return builder_.EndDict();
-}
-
-Builder::DictItemContext Builder::DictKeyContext::Value(Node value) {
-    builder_.Value(std::move(value));
-    return Builder::DictItemContext(builder_);
-}
-
-Builder::DictItemContext Builder::DictKeyContext::StartDict() {
-    return builder_.StartDict();
-}
-
-Builder::ArrayItemContext Builder::DictKeyContext::StartArray() {
-    return builder_.StartArray();
-}
-
-Builder::ArrayItemContext Builder::ArrayItemContext::Value(Node value) {
-    builder_.Value(std::move(value));
-    return Builder::ArrayItemContext(builder_);
-}
-
-Builder::DictItemContext Builder::ArrayItemContext::StartDict() {
-    return builder_.StartDict();
-}
-
-Builder::ArrayItemContext Builder::ArrayItemContext::StartArray() {
-    return builder_.StartArray();
-}
-
-Builder& Builder::ArrayItemContext::EndArray() {
-    return builder_.EndArray();
 }
 
 } // namespace json

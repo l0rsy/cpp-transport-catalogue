@@ -1,8 +1,10 @@
-#include "transport_catalogue.h"
-
 #include <algorithm>
 #include <cmath>
 #include <unordered_set>
+#include <stdexcept>
+
+#include "transport_catalogue.h"
+#include "transport_router.h" 
 
 namespace transport {
 
@@ -10,8 +12,7 @@ using namespace std;
 
 size_t TransportCatalogue::PairStopHasher::operator()(const std::pair<const domain::Stop*, const domain::Stop*>& stops) const { 
     return std::hash<const void*>{}(stops.first) * 37 +  
-        std::hash<const void*>{}(stops.second); 
-
+        std::hash<const void*>{}(stops.second);
 } 
 
 void TransportCatalogue::AddStop(const std::string& name, geo::Coordinates coords) {
@@ -200,6 +201,54 @@ vector<const domain::Stop*> TransportCatalogue::GetStopsUsedInRoutes() const {
     }
     
     return result;
+}
+
+int TransportCatalogue::GetDistanceByRoad(const domain::Stop* from, const domain::Stop* to) const {
+    auto it = stops_distances_.find({from, to});
+    if (it != stops_distances_.end()) {
+        return it->second;
+    }
+    return 0;
+}
+
+double TransportCatalogue::GetDistanceBetween(const domain::Stop* from, const domain::Stop* to) const {
+    return static_cast<double>(GetDistance(from, to));
+}
+
+const unordered_map<string_view, const domain::Stop*>& TransportCatalogue::GetAllStops() const {
+    return stop_name_to_stop_;
+}
+
+const unordered_map<string_view, const domain::Bus*>& TransportCatalogue::GetAllBuses() const {
+    return bus_name_to_bus_;
+}
+
+int TransportCatalogue::GetStopsCount() const {
+    return stops_.size();
+}
+
+void TransportCatalogue::SetRoutingSettings(const domain::RoutingSettings& settings) {
+    routing_settings_ = settings;
+    router_built_ = false;  
+}
+
+const domain::RoutingSettings& TransportCatalogue::GetRoutingSettings() const {
+    return routing_settings_;
+}
+
+void TransportCatalogue::BuildRouter() {
+    if (!router_built_) {
+        router_ = make_shared<TransportRouter>(*this, routing_settings_);
+        router_->BuildGraph();
+        router_built_ = true;
+    }
+}
+
+shared_ptr<TransportRouter> TransportCatalogue::GetRouter() const {
+    if (!router_built_) {
+        throw runtime_error("Router has not been built yet. Call BuildRouter() first.");
+    }
+    return router_;
 }
 
 } // namespace transport

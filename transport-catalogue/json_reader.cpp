@@ -1,13 +1,23 @@
-#include "json_reader.h"
-#include "json_builder.h"
 #include <algorithm>
 #include <string>
 #include <iomanip>
 #include <sstream>
+#include <optional>
+#include <string_view>
+
+#include "json_reader.h"
+#include "json_builder.h"
 
 namespace json_reader {
 
 using namespace std::literals;
+
+transport::RequestHandler& JsonReader::GetRequestHandler() {
+    if (!request_handler_.has_value()) {
+        request_handler_.emplace(catalogue_);
+    }
+    return *request_handler_;
+}
 
 JsonReader::JsonReader(const std::string& json_str) 
     : input_doc_([&json_str]() {
@@ -23,9 +33,26 @@ JsonReader::JsonReader(const json::Document& doc)
 void JsonReader::LoadData() {
     const auto& root_map = input_doc_.GetRoot().AsMap();
     
+    if (root_map.count("routing_settings"s)) {
+        ParseRoutingSettings(root_map.at("routing_settings"s).AsMap());
+    }
+    
     if (root_map.count("base_requests"s)) {
         ParseBaseRequests(root_map.at("base_requests"s).AsArray());
     }
+    catalogue_.BuildRouter();
+}
+
+void JsonReader::ParseRoutingSettings(const json::Dict& settings_dict) {
+    domain::RoutingSettings settings;
+    settings.bus_wait_time = settings_dict.at("bus_wait_time"s).AsInt();
+    settings.bus_velocity = settings_dict.at("bus_velocity"s).AsDouble();
+    catalogue_.SetRoutingSettings(settings);
+}
+
+
+domain::RoutingSettings JsonReader::GetRoutingSettings() const {
+    return catalogue_.GetRoutingSettings();
 }
 
 std::string ColorToString(const json::Node& color_node) {
@@ -183,12 +210,68 @@ json::Array JsonReader::ProcessStatRequests(const json::Array& requests) {
             response = ProcessStopRequest(request_map);
         } else if (type == "Map"s) { 
             response = ProcessMapRequest(request_map);
+        } else if (type == "Route"s) {
+            response = ProcessRouteRequest(request_map);
         }
         
         responses.push_back(response);
     }
     
     return responses;
+}
+
+json::Node JsonReader::ProcessRouteRequest(const json::Dict& request) {
+    std::string from = request.at("from"s).AsString();
+    std::string to = request.at("to"s).AsString();
+    int id = request.at("id"s).AsInt();
+    
+    auto& request_handler = GetRequestHandler();
+    auto route_response = request_handler.GetRoute(from, to);
+    
+    if (!route_response) {
+        // Используем Builder для ошибки
+        return json::Builder{}
+            .StartDict()
+                .Key("request_id"s).Value(id)
+                .Key("error_message"s).Value("not found"s)
+            .EndDict()
+            .Build();
+    }
+    
+    // Используем Builder для успешного ответа
+    json::Array items_array;
+    for (const auto& item : route_response->items) {
+        if (item.type == "Wait") {
+            items_array.push_back(
+                json::Builder{}
+                    .StartDict()
+                        .Key("type"s).Value("Wait"s)
+                        .Key("stop_name"s).Value(item.stop_name)
+                        .Key("time"s).Value(item.time)
+                    .EndDict()
+                    .Build()
+            );
+        } else if (item.type == "Bus") {
+            items_array.push_back(
+                json::Builder{}
+                    .StartDict()
+                        .Key("type"s).Value("Bus"s)
+                        .Key("bus"s).Value(item.bus)
+                        .Key("span_count"s).Value(item.span_count)
+                        .Key("time"s).Value(item.time)
+                    .EndDict()
+                    .Build()
+            );
+        }
+    }
+    
+    return json::Builder{}
+        .StartDict()
+            .Key("request_id"s).Value(id)
+            .Key("total_time"s).Value(route_response->total_time)
+            .Key("items"s).Value(std::move(items_array))
+        .EndDict()
+        .Build();
 }
 
 json::Node JsonReader::ProcessBusRequest(const json::Dict& request) {

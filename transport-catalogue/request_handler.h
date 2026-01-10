@@ -1,4 +1,3 @@
-// request_handler.h
 #pragma once
 
 #include "transport_catalogue.h"
@@ -18,7 +17,8 @@ public:
 
     svg::Document RenderMap() const;
     svg::Document RenderMap(const map_renderer::RenderSettings& settings) const;
-    
+
+    std::optional<domain::RouteResponse> GetRoute(std::string_view from, std::string_view to) const;
 
 private:
     TransportCatalogue& db_;

@@ -1,5 +1,5 @@
-// request_handler.cpp
 #include "request_handler.h"
+#include "transport_router.h"
 
 namespace transport {
 
@@ -15,6 +15,17 @@ svg::Document RequestHandler::RenderMap(const map_renderer::RenderSettings& sett
     map_renderer::MapRenderer renderer;
     renderer.SetSettings(settings);
     return renderer.RenderMap(db_);
+}
+
+std::optional<domain::RouteResponse> RequestHandler::GetRoute(
+    std::string_view from, std::string_view to) const {
+    
+    auto router = db_.GetRouter();
+    if (!router) {
+        return std::nullopt;
+    }
+    
+    return router->FindRoute(from, to);
 }
 
 } // namespace transport

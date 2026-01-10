@@ -9,6 +9,12 @@
 #include <vector>
 #include <optional>
 #include <set>
+#include <memory>
+
+// Forward declaration
+namespace transport {
+    class TransportRouter;
+}
 
 namespace transport {
 
@@ -17,6 +23,17 @@ public:
     void AddStop(const std::string& name, geo::Coordinates coords);
     void AddBus(const std::string& name, const std::vector<std::string>& stop_names, bool is_roundtrip);
     void AddDistance(const std::string& from, const std::string& to, int distance);
+    
+    void SetRoutingSettings(const domain::RoutingSettings& settings);
+    const domain::RoutingSettings& GetRoutingSettings() const;
+    void BuildRouter();
+    std::shared_ptr<TransportRouter> GetRouter() const;
+    
+    double GetDistanceBetween(const domain::Stop* from, const domain::Stop* to) const;
+    const std::unordered_map<std::string_view, const domain::Stop*>& GetAllStops() const;
+    const std::unordered_map<std::string_view, const domain::Bus*>& GetAllBuses() const;
+    int GetStopsCount() const;
+    int GetDistanceByRoad(const domain::Stop* from, const domain::Stop* to) const;
 
     const domain::Bus* GetBus(std::string_view name) const;
     const domain::Stop* GetStop(std::string_view name) const;
@@ -40,6 +57,10 @@ private:
         size_t operator()(const std::pair<const domain::Stop*, const domain::Stop*>& stops) const;
     };
     std::unordered_map<std::pair<const domain::Stop*, const domain::Stop*>, int, PairStopHasher> stops_distances_;
+    
+    domain::RoutingSettings routing_settings_;
+    mutable std::shared_ptr<TransportRouter> router_;
+    mutable bool router_built_ = false;
 };
 
 } // namespace transport

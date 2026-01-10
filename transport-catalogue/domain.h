@@ -30,4 +30,24 @@ struct BusInfo {
     double curvature;
 };
 
+struct RoutingSettings {
+    int bus_wait_time = 0;     // в минутах
+    double bus_velocity = 0.0; // в км/ч
+};
+
+struct RouteItem {
+    std::string type;
+    std::string stop_name;
+    std::string bus; 
+    int span_count = 0;
+    double time = 0.0;
+};
+
+struct RouteResponse {
+    int request_id = 0;
+    double total_time = 0.0;
+    std::vector<RouteItem> items;
+    std::string error_message;
+};
+
 } // namespace domain

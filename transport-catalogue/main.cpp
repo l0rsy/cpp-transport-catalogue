@@ -20,7 +20,7 @@ int main() {
         json_reader::JsonReader reader(input_str);
         
         // Загружаем данные в каталог
-        reader.LoadData();
+        reader.LoadData();  // В этом методе теперь также строится граф
         
         // Обрабатываем запросы и получаем JSON документ
         json::Document responses = reader.ProcessRequests();
